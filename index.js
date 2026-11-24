@@ -27,7 +27,7 @@ function resolveClientDir() {
       return dir;
     }
   }
-  return path.join(__dirname, '..', 'client');
+  return null;
 }
 
 const CLIENT_DIR = resolveClientDir();
@@ -42,6 +42,7 @@ let botStatus = 'stopped'; // stopped | starting | online | reconnecting
 let pairingCode = '';
 let activeBot = null;
 let currentPhone = (process.env.BOT_PHONE || '').replace(/\D/g, '');
+let currentOwner = (process.env.OWNER_PHONE || process.env.BOT_PHONE || '').replace(/\D/g, '');
 const logs = [];
 
 // ── تسجيل الأحداث ──────────────────────────────────────────────────────────
@@ -103,7 +104,11 @@ function startBot(filename) {
 
   botProcess = spawn(runner[0], [...runner.slice(1), filePath], {
     cwd: BOTS_DIR,
-    env: { ...process.env, BOT_PHONE: currentPhone },
+    env: {
+      ...process.env,
+      BOT_PHONE: currentPhone,
+      OWNER_PHONE: currentOwner || currentPhone,
+    },
   });
 
   botProcess.stdout.on('data', d => d.toString().split('\n').forEach(l => addLog(l, 'out')));
@@ -317,7 +322,20 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  if (method === 'GET') {
+  if (method === 'GET' && urlPath === '/' && !CLIENT_DIR) {
+    res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
+    return res.end(`<!doctype html>
+<html lang="ar" dir="rtl">
+<head><meta charset="utf-8"><title>لوحة التحكم</title></head>
+<body style="font-family:sans-serif;background:#111;color:#eee;padding:24px">
+  <h2>الخادم يعمل بنجاح</h2>
+  <p>لم يتم العثور على ملف <code>index.html</code> داخل مجلدات الواجهة.</p>
+  <p>أضف ملف <code>index.html</code> داخل مجلد <code>client</code> أو بجانب <code>index.js</code> ثم أعد النشر.</p>
+</body>
+</html>`);
+  }
+
+  if (method === 'GET' && CLIENT_DIR) {
     const safeRel = path.normalize(urlPath === '/' ? 'index.html' : urlPath).replace(/^(\.\.[/\\])+/, '');
     serveStatic(res, path.join(CLIENT_DIR, safeRel));
     return;
@@ -330,4 +348,3 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   addLog(`[SERVER] أميرتي Cloud Panel تعمل على المنفذ ${PORT}`, 'sys');
 });
-  
