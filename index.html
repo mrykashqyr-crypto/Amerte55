@@ -1,0 +1,676 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>أميرتي — لوحة التحكم السحابية</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;800;900&family=JetBrains+Mono:wght@400;600;700&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --bg-deep: #060a13;
+      --bg-surface: #0c1322;
+      --bg-elevated: #111b30;
+      --border-glow: rgba(34,211,238,0.2);
+    }
+    * { box-sizing: border-box; }
+    body {
+      font-family: 'Cairo', system-ui, sans-serif;
+      background-color: var(--bg-deep);
+      background-image:
+        radial-gradient(circle at 12% 8%, rgba(34,211,238,0.13), transparent 36%),
+        radial-gradient(circle at 88% 12%, rgba(16,185,129,0.11), transparent 34%),
+        linear-gradient(180deg, #060a13 0%, #09101f 100%);
+      color: #f1f5f9;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+    .mono { font-family: 'JetBrains Mono', monospace; direction: ltr; unicode-bidi: isolate; }
+    .panel-card {
+      background: rgba(12,19,34,0.88);
+      backdrop-filter: blur(14px);
+      border: 1px solid var(--border-glow);
+      box-shadow: 0 14px 36px rgba(0,0,0,0.45);
+    }
+    .custom-scroll::-webkit-scrollbar { width:6px; height:6px; }
+    .custom-scroll::-webkit-scrollbar-track { background:rgba(15,23,42,0.55); border-radius:9999px; }
+    .custom-scroll::-webkit-scrollbar-thumb { background:rgba(148,163,184,0.3); border-radius:9999px; }
+    .custom-scroll::-webkit-scrollbar-thumb:hover { background:rgba(34,211,238,0.5); }
+    @keyframes pulseBeacon { 0%,100%{opacity:1;transform:scale(1)} 50%{opacity:.45;transform:scale(.88)} }
+    .beacon { animation: pulseBeacon 2s infinite ease-in-out; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    .spin { animation: spin 1s linear infinite; }
+  </style>
+</head>
+<body class="antialiased selection:bg-cyan-500/30 selection:text-cyan-100">
+
+<!-- Toast -->
+<div id="toastWrap" class="fixed bottom-4 left-4 right-4 sm:left-auto sm:right-6 sm:w-96 z-50 hidden">
+  <div class="panel-card rounded-2xl px-4 py-3 flex items-center justify-between gap-3 border-cyan-400/40">
+    <div class="flex items-center gap-2.5 text-xs sm:text-sm font-bold">
+      <span id="toastDot" class="w-2.5 h-2.5 rounded-full bg-cyan-400 shrink-0"></span>
+      <span id="toastMsg" class="text-slate-100"></span>
+    </div>
+    <button id="toastClose" class="text-xs text-slate-400 hover:text-white px-2 py-1 rounded-lg hover:bg-slate-800 cursor-pointer">إغلاق</button>
+  </div>
+</div>
+
+<!-- Header -->
+<header class="sticky top-0 z-30 panel-card border-b border-cyan-500/20">
+  <div class="max-w-7xl mx-auto px-4 sm:px-6 py-3.5 flex flex-wrap items-center justify-between gap-3">
+    <div class="flex items-center gap-3">
+      <div class="w-11 h-11 rounded-2xl bg-gradient-to-br from-cyan-400/25 via-emerald-400/20 to-indigo-500/25 border border-cyan-400/40 flex items-center justify-center shadow-lg shadow-cyan-500/10">
+        <svg class="w-6 h-6 text-cyan-300" fill="none" stroke="currentColor" stroke-width="1.9" viewBox="0 0 24 24">
+          <path stroke-linecap="round" stroke-linejoin="round" d="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2m-2-4h.01M17 16h.01"/>
+        </svg>
+      </div>
+      <div>
+        <div class="flex flex-wrap items-center gap-2">
+          <h1 class="text-base sm:text-xl font-black text-white tracking-tight">أميرتي <span class="text-cyan-400">Cloud Panel</span></h1>
+          <span class="text-[11px] font-bold px-2.5 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/30">استضافة + طرفية + رفع ملفات</span>
+        </div>
+        <p class="text-xs text-slate-400">تحكم سحابي كامل بالبوت — ارفع ملف بوت وشغّله فوراً</p>
+      </div>
+    </div>
+    <div class="flex flex-wrap items-center gap-2">
+      <div id="globalPill" class="px-3.5 py-2 rounded-xl text-xs font-extrabold bg-slate-800 text-slate-400 border border-slate-700 flex items-center gap-2">
+        <span id="globalDot" class="w-2.5 h-2.5 rounded-full bg-slate-500 beacon"></span>
+        <span id="globalTxt">جاري الاتصال…</span>
+      </div>
+      <button id="openDeployBtn" class="px-3.5 py-2 rounded-xl text-xs sm:text-sm font-extrabold bg-gradient-to-l from-cyan-500 to-emerald-500 hover:from-cyan-400 hover:to-emerald-400 text-slate-950 shadow-md shadow-cyan-500/20 transition cursor-pointer flex items-center gap-1.5">
+        <svg class="w-4 h-4" fill="none" stroke="currentColor" stroke-width="2.2" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4"/></svg>
+        أكواد الرفع (GitHub & Render)
+      </button>
+    </div>
+  </div>
+</header>
+
+<main class="max-w-7xl mx-auto px-4 sm:px-6 py-5 space-y-5">
+
+  <!-- Pairing Banner -->
+  <section id="pairingBanner" class="hidden panel-card rounded-2xl p-4 sm:p-5 bg-gradient-to-l from-emerald-950/90 via-teal-950/85 to-cyan-950/90 border-emerald-400/50">
+    <div class="flex flex-col sm:flex-row items-center justify-between gap-4">
+      <div class="text-center sm:text-right space-y-1">
+        <div class="inline-flex items-center gap-2 text-xs font-extrabold px-3 py-1 rounded-full bg-emerald-500/20 text-emerald-300 border border-emerald-400/30">🔑 كود ربط واتساب جاهز الآن</div>
+        <h2 class="text-base sm:text-lg font-extrabold text-white">افتح واتساب ← الأجهزة المرتبطة ← ربط جهاز ← الربط برقم الهاتف</h2>
+        <p class="text-xs text-emerald-200/80">أدخل هذا الكود المكون من 8 خانات فوراً لإتمام ربط البوت بالسيرفر السحابي.</p>
+      </div>
+      <div class="flex items-center gap-3">
+        <div id="pairingCodeVal" class="mono text-2xl sm:text-3xl font-black tracking-[0.22em] px-5 py-3 rounded-2xl bg-slate-950/90 text-emerald-300 border border-emerald-400/50 shadow-inner">--------</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Row 1: Controls + Upload -->
+  <section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+    <!-- Server Controls -->
+    <div class="lg:col-span-7 panel-card rounded-2xl p-4 sm:p-5 space-y-4">
+      <div class="flex flex-wrap items-center justify-between gap-2">
+        <div>
+          <h2 class="text-sm sm:text-base font-extrabold text-white flex items-center gap-2">
+            <span class="w-2.5 h-2.5 rounded-full bg-cyan-400"></span> إدارة السيرفر وتشغيل البوت
+          </h2>
+          <p class="text-xs text-slate-400 mt-0.5">كلمة مرور الإدارة + رقم الواتساب + اختيار ملف البوت</p>
+        </div>
+        <div id="botStatusBadge" class="px-3 py-1 rounded-xl text-xs font-black bg-slate-800 text-slate-400 border border-slate-700">متوقف</div>
+      </div>
+
+      <div class="grid grid-cols-1 sm:grid-cols-12 gap-2.5">
+        <div class="sm:col-span-4">
+          <label class="block text-[11px] font-bold text-slate-400 mb-1">كلمة مرور الإدارة</label>
+          <input id="adminPass" type="password" value="amirati2026" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-400 focus:outline-none text-xs sm:text-sm text-white"/>
+        </div>
+        <div class="sm:col-span-5">
+          <label class="block text-[11px] font-bold text-slate-400 mb-1">رقم الواتساب (مع رمز الدولة)</label>
+          <input id="botPhone" type="text" dir="ltr" placeholder="963958414394" class="mono w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-400 focus:outline-none text-xs sm:text-sm text-emerald-300"/>
+        </div>
+        <div class="sm:col-span-3 flex items-end">
+          <button id="savePhoneBtn" class="w-full py-2.5 px-3 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/40 font-extrabold text-xs sm:text-sm transition cursor-pointer">حفظ وطلب كود</button>
+        </div>
+      </div>
+
+      <!-- Active bot selector -->
+      <div>
+        <label class="block text-[11px] font-bold text-slate-400 mb-1">ملف البوت المراد تشغيله</label>
+        <select id="botSelector" class="w-full px-3 py-2.5 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-400 focus:outline-none text-xs sm:text-sm text-white">
+          <option value="">— ارفع ملف أولاً —</option>
+        </select>
+      </div>
+
+      <div class="grid grid-cols-2 sm:grid-cols-4 gap-2.5 pt-1">
+        <button id="btnStart"   class="py-2.5 px-3 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 font-extrabold text-xs sm:text-sm transition cursor-pointer">▶️ تشغيل</button>
+        <button id="btnRestart" class="py-2.5 px-3 rounded-xl bg-amber-500/20   hover:bg-amber-500/30   text-amber-200   border border-amber-400/40   font-extrabold text-xs sm:text-sm transition cursor-pointer">🔄 إعادة تشغيل</button>
+        <button id="btnStop"    class="py-2.5 px-3 rounded-xl bg-rose-500/20    hover:bg-rose-500/30    text-rose-200    border border-rose-400/40    font-extrabold text-xs sm:text-sm transition cursor-pointer">⏹️ إيقاف</button>
+        <button id="btnReset"   class="py-2.5 px-3 rounded-xl bg-slate-800      hover:bg-rose-950/60    text-rose-300    border border-slate-700       font-extrabold text-xs sm:text-sm transition cursor-pointer">🗑️ حذف الجلسة</button>
+      </div>
+    </div>
+
+    <!-- File Upload Panel -->
+    <div class="lg:col-span-5 panel-card rounded-2xl p-4 sm:p-5 flex flex-col gap-4">
+      <div>
+        <h2 class="text-sm sm:text-base font-extrabold text-white">📁 رفع ملفات البوت</h2>
+        <p class="text-xs text-slate-400 mt-0.5">ارفع ملف .js أو .py أو .sh وشغّله من القائمة بالأعلى</p>
+      </div>
+
+      <!-- Drop zone -->
+      <div id="dropZone" class="flex-1 border-2 border-dashed border-slate-700 hover:border-cyan-400/60 rounded-2xl p-6 text-center transition cursor-pointer flex flex-col items-center justify-center gap-3">
+        <div class="text-3xl">⬆️</div>
+        <p class="text-sm font-bold text-slate-300">اسحب الملف هنا أو</p>
+        <label class="px-4 py-2 rounded-xl bg-cyan-500/20 hover:bg-cyan-500/30 text-cyan-200 border border-cyan-400/40 font-extrabold text-xs cursor-pointer transition">
+          اختر ملف
+          <input id="fileInput" type="file" multiple accept=".js,.py,.ts,.sh" hidden/>
+        </label>
+        <p class="text-[11px] text-slate-500">.js · .py · .ts · .sh · حتى 10 MB</p>
+      </div>
+
+      <!-- Upload progress -->
+      <div id="uploadProg" class="hidden space-y-1.5">
+        <div class="h-1.5 bg-slate-800 rounded-full overflow-hidden"><div id="progFill" class="h-full bg-cyan-400 transition-all duration-300" style="width:0%"></div></div>
+        <p id="progLbl" class="text-xs text-slate-400"></p>
+      </div>
+
+      <!-- Uploaded files list -->
+      <div>
+        <p class="text-[11px] font-bold text-slate-500 mb-2">الملفات المرفوعة</p>
+        <div id="filesList" class="space-y-1.5 max-h-36 overflow-y-auto custom-scroll">
+          <p class="text-xs text-slate-600 italic">لا توجد ملفات بعد</p>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Row 2: Terminal + Sandbox -->
+  <section class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+
+    <!-- Terminal -->
+    <div class="lg:col-span-6 panel-card rounded-2xl flex flex-col overflow-hidden">
+      <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2">
+          <span class="w-2.5 h-2.5 rounded-full bg-rose-400"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span>
+          <span class="w-2.5 h-2.5 rounded-full bg-emerald-400"></span>
+          <h2 class="text-xs sm:text-sm font-extrabold text-white mr-1">الطرفية الحية (Live Terminal)</h2>
+        </div>
+        <button id="clearTermBtn" class="text-[11px] font-bold px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer">تنظيف</button>
+      </div>
+
+      <div class="px-3 py-2.5 bg-slate-950/70 border-b border-slate-800/80 flex flex-wrap items-center gap-1.5">
+        <button data-shell="npm install"       class="sh-btn mono text-[11px] px-2.5 py-1 rounded-lg bg-emerald-500/15 hover:bg-emerald-500/25 text-emerald-300 border border-emerald-400/30 cursor-pointer">npm install</button>
+        <button data-shell="npm start"         class="sh-btn mono text-[11px] px-2.5 py-1 rounded-lg bg-cyan-500/15   hover:bg-cyan-500/25   text-cyan-300   border border-cyan-400/30   cursor-pointer">npm start</button>
+        <button data-shell="node index.js"     class="sh-btn mono text-[11px] px-2.5 py-1 rounded-lg bg-cyan-500/15   hover:bg-cyan-500/25   text-cyan-300   border border-cyan-400/30   cursor-pointer">node index.js</button>
+        <button data-shell="rm -rf auth_info"  class="sh-btn mono text-[11px] px-2.5 py-1 rounded-lg bg-rose-500/15   hover:bg-rose-500/25   text-rose-300   border border-rose-400/30   cursor-pointer">rm -rf auth_info</button>
+        <button data-shell="ls -la"            class="sh-btn mono text-[11px] px-2.5 py-1 rounded-lg bg-slate-800     hover:bg-slate-700     text-slate-200  border border-slate-700     cursor-pointer">ls -la</button>
+        <button data-shell="help"              class="sh-btn mono text-[11px] px-2.5 py-1 rounded-lg bg-slate-800     hover:bg-slate-700     text-violet-300 border border-slate-700     cursor-pointer">help</button>
+      </div>
+
+      <div id="termLogs" class="custom-scroll mono text-[11px] sm:text-xs p-4 h-[340px] overflow-y-auto bg-[#04070f] space-y-1 leading-relaxed"></div>
+
+      <form id="termForm" class="p-3 bg-slate-900/95 border-t border-slate-800 flex items-center gap-2">
+        <span class="mono text-emerald-400 font-bold text-xs sm:text-sm select-none">$</span>
+        <input id="termInput" type="text" dir="ltr" autocomplete="off" placeholder="أدخل أمر shell..." class="mono flex-1 px-3 py-2 rounded-xl bg-slate-950 border border-slate-700 focus:border-cyan-400 focus:outline-none text-xs sm:text-sm text-slate-100 placeholder:text-slate-600"/>
+        <button type="submit" class="px-4 py-2 rounded-xl bg-cyan-500 hover:bg-cyan-400 text-slate-950 font-extrabold text-xs sm:text-sm transition cursor-pointer shrink-0">تنفيذ</button>
+      </form>
+    </div>
+
+    <!-- WhatsApp Sandbox -->
+    <div class="lg:col-span-6 panel-card rounded-2xl flex flex-col overflow-hidden">
+      <div class="px-4 py-3 bg-slate-900/90 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+        <div class="flex items-center gap-2.5">
+          <div class="w-9 h-9 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-400 text-slate-950 font-black flex items-center justify-center text-sm">أ</div>
+          <div>
+            <div class="flex items-center gap-2">
+              <h2 id="sbGroupName" class="text-xs sm:text-sm font-extrabold text-white">ديوانية المطورين</h2>
+              <span id="sbLock" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-300 border border-emerald-400/30">🔓 مفتوح</span>
+            </div>
+            <div class="text-[11px] text-slate-400"><span id="sbTarget">الهدف: سامر (عضو)</span></div>
+          </div>
+        </div>
+        <div class="flex items-center gap-2">
+          <select id="sbRole" class="px-2.5 py-1.5 rounded-xl bg-slate-950 border border-slate-700 text-xs text-white focus:border-cyan-400 focus:outline-none">
+            <option value="admin" selected>مشرف</option>
+            <option value="member">عضو</option>
+          </select>
+          <button id="resetSbBtn" class="text-[11px] font-bold px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 cursor-pointer">مسح</button>
+        </div>
+      </div>
+
+      <div class="px-3 py-2.5 bg-slate-950/60 border-b border-slate-800/80 flex flex-wrap gap-1.5">
+        <button data-wa="أميرتي مرحبا، شو خطة اليوم؟"       class="wa-q text-[11px] font-bold px-2.5 py-1 rounded-xl bg-cyan-500/15     hover:bg-cyan-500/25     text-cyan-200   border border-cyan-400/30     cursor-pointer">✨ مرحبا</button>
+        <button data-wa="أميرتي منشن"                        class="wa-q text-[11px] font-bold px-2.5 py-1 rounded-xl bg-violet-500/15   hover:bg-violet-500/25   text-violet-200 border border-violet-400/30   cursor-pointer">📢 منشن</button>
+        <button data-wa="أميرتي قفل الجروب"                  class="wa-q text-[11px] font-bold px-2.5 py-1 rounded-xl bg-amber-500/15    hover:bg-amber-500/25    text-amber-200  border border-amber-400/30    cursor-pointer">🔒 قفل</button>
+        <button data-wa="أميرتي افتح الجروب"                 class="wa-q text-[11px] font-bold px-2.5 py-1 rounded-xl bg-emerald-500/15  hover:bg-emerald-500/25  text-emerald-200 border border-emerald-400/30 cursor-pointer">🔓 فتح</button>
+        <button data-wa="أميرتي ترقية"                       class="wa-q text-[11px] font-bold px-2.5 py-1 rounded-xl bg-sky-500/15      hover:bg-sky-500/25      text-sky-200    border border-sky-400/30      cursor-pointer">⭐ ترقية</button>
+        <button data-wa="أميرتي طرد"                         class="wa-q text-[11px] font-bold px-2.5 py-1 rounded-xl bg-rose-500/15     hover:bg-rose-500/25     text-rose-200   border border-rose-400/30     cursor-pointer">🚫 طرد</button>
+        <button data-wa="أميرتي انسى"                        class="wa-q text-[11px] font-bold px-2.5 py-1 rounded-xl bg-slate-800       hover:bg-slate-700       text-slate-300  border border-slate-700       cursor-pointer">🧠 انسى</button>
+      </div>
+
+      <div id="sbChat" class="custom-scroll flex-1 p-4 space-y-3 h-[340px] overflow-y-auto bg-[radial-gradient(circle_at_top,_rgba(16,185,129,0.05),_transparent_65%)]"></div>
+
+      <form id="sbForm" class="p-3 bg-slate-900/95 border-t border-slate-800 flex items-center gap-2">
+        <input id="sbInput" type="text" autocomplete="off" placeholder="أميرتي مرحبا / أميرتي قفل الجروب..." class="flex-1 px-3.5 py-2 rounded-xl bg-slate-950 border border-slate-700 focus:border-emerald-400 focus:outline-none text-xs sm:text-sm text-white placeholder:text-slate-500"/>
+        <button type="submit" class="px-4 py-2 rounded-xl bg-gradient-to-l from-emerald-500 to-cyan-500 hover:from-emerald-400 hover:to-cyan-400 text-slate-950 font-extrabold text-xs sm:text-sm transition cursor-pointer shrink-0">إرسال</button>
+      </form>
+    </div>
+  </section>
+</main>
+
+<!-- Deploy Modal -->
+<div id="deployModal" class="fixed inset-0 z-40 hidden bg-slate-950/85 backdrop-blur-md p-3 sm:p-6 overflow-y-auto">
+  <div class="max-w-4xl mx-auto panel-card rounded-3xl border-cyan-400/35 overflow-hidden my-4">
+    <div class="px-5 py-4 bg-slate-900/95 border-b border-slate-800 flex flex-wrap items-center justify-between gap-3">
+      <div>
+        <h3 class="text-base sm:text-lg font-black text-white">ملفات الرفع الجاهزة لـ GitHub و Render</h3>
+        <p class="text-xs text-slate-400">Build Command: <code class="mono text-cyan-300">npm install</code> • Start Command: <code class="mono text-emerald-300">node index.js</code></p>
+      </div>
+      <button id="closeDeployBtn" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-bold border border-slate-700 cursor-pointer">✕ إغلاق</button>
+    </div>
+    <div class="px-5 pt-3 bg-slate-950/70 border-b border-slate-800 flex flex-wrap items-center justify-between gap-2">
+      <div class="flex flex-wrap gap-1.5" id="codeTabs"></div>
+      <div class="flex items-center gap-2 pb-2">
+        <button id="copyFileBtn"     class="px-3 py-1.5 rounded-xl bg-cyan-500/20   hover:bg-cyan-500/30   text-cyan-200   border border-cyan-400/40   text-xs font-extrabold cursor-pointer">📋 نسخ</button>
+        <button id="downloadFileBtn" class="px-3 py-1.5 rounded-xl bg-emerald-500/20 hover:bg-emerald-500/30 text-emerald-200 border border-emerald-400/40 text-xs font-extrabold cursor-pointer">⬇️ تحميل</button>
+      </div>
+    </div>
+    <div class="p-4 sm:p-5 bg-[#04070f]">
+      <pre id="codeViewer" class="custom-scroll mono text-xs text-slate-200 h-[380px] overflow-auto leading-relaxed whitespace-pre"></pre>
+    </div>
+  </div>
+</div>
+
+<script>
+(function () {
+'use strict';
+
+// ── State ──────────────────────────────────────────────────────
+const S = {
+  pass:        'amirati2026',
+  logSince:    0,
+  pollTimer:   null,
+  activeFile:  'index.js',
+  sbMemory:    [],
+  sbGroupLocked: false,
+  sbGroupName:   'ديوانية المطورين',
+  sbMembers:  [
+    { id:'m1', name:'سامر',  role:'member' },
+    { id:'m2', name:'ليلى',  role:'admin'  },
+    { id:'m3', name:'كريم',  role:'member' },
+  ],
+  sbTargetId: 'm1',
+};
+
+// ── DOM ────────────────────────────────────────────────────────
+const $  = id => document.getElementById(id);
+const el = {
+  globalPill: $('globalPill'), globalDot: $('globalDot'), globalTxt: $('globalTxt'),
+  pairingBanner: $('pairingBanner'), pairingCodeVal: $('pairingCodeVal'),
+  botStatusBadge: $('botStatusBadge'),
+  adminPass: $('adminPass'), botPhone: $('botPhone'),
+  savePhoneBtn: $('savePhoneBtn'), botSelector: $('botSelector'),
+  btnStart: $('btnStart'), btnRestart: $('btnRestart'), btnStop: $('btnStop'), btnReset: $('btnReset'),
+  dropZone: $('dropZone'), fileInput: $('fileInput'), uploadProg: $('uploadProg'),
+  progFill: $('progFill'), progLbl: $('progLbl'), filesList: $('filesList'),
+  termLogs: $('termLogs'), termForm: $('termForm'), termInput: $('termInput'), clearTermBtn: $('clearTermBtn'),
+  sbChat: $('sbChat'), sbForm: $('sbForm'), sbInput: $('sbInput'), sbRole: $('sbRole'),
+  sbGroupName: $('sbGroupName'), sbLock: $('sbLock'), sbTarget: $('sbTarget'), resetSbBtn: $('resetSbBtn'),
+  openDeployBtn: $('openDeployBtn'), deployModal: $('deployModal'), closeDeployBtn: $('closeDeployBtn'),
+  codeTabs: $('codeTabs'), codeViewer: $('codeViewer'), copyFileBtn: $('copyFileBtn'), downloadFileBtn: $('downloadFileBtn'),
+  toastWrap: $('toastWrap'), toastMsg: $('toastMsg'), toastDot: $('toastDot'), toastClose: $('toastClose'),
+};
+
+// ── Toast ──────────────────────────────────────────────────────
+let toastTimer;
+function toast(msg, type = 'info') {
+  const colors = { success:'bg-emerald-400', error:'bg-rose-400', info:'bg-cyan-400' };
+  el.toastDot.className = `w-2.5 h-2.5 rounded-full shrink-0 ${colors[type] || colors.info}`;
+  el.toastMsg.textContent = msg;
+  el.toastWrap.classList.remove('hidden');
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => el.toastWrap.classList.add('hidden'), 3500);
+}
+el.toastClose.onclick = () => el.toastWrap.classList.add('hidden');
+
+// ── API ────────────────────────────────────────────────────────
+async function api(url, opts = {}) {
+  const r = await fetch(url, { headers:{'Content-Type':'application/json'}, ...opts });
+  return r.json();
+}
+
+function pass() { return el.adminPass.value.trim() || 'amirati2026'; }
+
+async function action(payload) {
+  try {
+    const d = await api('/api/action', { method:'POST', body: JSON.stringify({ pass: pass(), ...payload }) });
+    if (!d.ok) toast(d.error || 'خطأ', 'error');
+    return d;
+  } catch { toast('تعذّر الاتصال بالخادم', 'error'); }
+}
+
+// ── Status sync ────────────────────────────────────────────────
+const statusMeta = {
+  stopped:      { text:'متوقف',         cls:'bg-slate-800 text-slate-400 border-slate-700' },
+  starting:     { text:'يبدأ…',         cls:'bg-amber-500/20 text-amber-200 border-amber-400/40' },
+  online:       { text:'متصل ✓',        cls:'bg-emerald-500/20 text-emerald-200 border-emerald-400/40' },
+  reconnecting: { text:'إعادة اتصال…',  cls:'bg-cyan-500/20 text-cyan-200 border-cyan-400/40' },
+};
+
+function syncStatus(state) {
+  const { status, pairingCode, bots, logs } = state;
+  const meta = statusMeta[status] || statusMeta.stopped;
+
+  // global pill
+  el.globalPill.className = `px-3.5 py-2 rounded-xl text-xs font-extrabold flex items-center gap-2 border ${meta.cls}`;
+  el.globalTxt.textContent = meta.text;
+  el.globalDot.className = `w-2.5 h-2.5 rounded-full beacon ${status === 'online' ? 'bg-emerald-400' : status === 'stopped' ? 'bg-slate-500' : 'bg-amber-400'}`;
+
+  // badge
+  el.botStatusBadge.className = `px-3 py-1 rounded-xl text-xs font-black border ${meta.cls}`;
+  el.botStatusBadge.textContent = meta.text;
+
+  // pairing
+  if (pairingCode) {
+    el.pairingBanner.classList.remove('hidden');
+    el.pairingCodeVal.textContent = pairingCode;
+  } else {
+    el.pairingBanner.classList.add('hidden');
+  }
+
+  // bots list
+  const selector = el.botSelector;
+  const prev = selector.value;
+  selector.innerHTML = '<option value="">— اختر ملف —</option>';
+  (bots || []).forEach(b => {
+    const o = document.createElement('option');
+    o.value = b.name; o.textContent = `${b.name} (${fmtSize(b.size)})`;
+    selector.appendChild(o);
+  });
+  if (prev) selector.value = prev;
+
+  renderFilesList(bots || []);
+
+  // logs
+  if (logs && logs.length) {
+    logs.forEach(l => appendTermLog(l.text, l.src));
+    S.logSince = logs.at(-1).ts;
+  }
+}
+
+function renderFilesList(bots) {
+  if (!bots.length) {
+    el.filesList.innerHTML = '<p class="text-xs text-slate-600 italic">لا توجد ملفات بعد</p>';
+    return;
+  }
+  el.filesList.innerHTML = bots.map(b => `
+    <div class="flex items-center justify-between gap-2 px-3 py-1.5 rounded-xl bg-slate-900/60 border border-slate-800">
+      <div class="flex items-center gap-2 min-w-0">
+        <span class="mono text-[10px] font-bold text-cyan-400 bg-cyan-500/10 px-1.5 py-0.5 rounded">${b.ext.replace('.','').toUpperCase()}</span>
+        <span class="text-xs text-slate-200 truncate">${esc(b.name)}</span>
+      </div>
+      <button data-del="${esc(b.name)}" class="del-btn text-[11px] font-bold text-rose-400 hover:text-rose-200 px-2 py-0.5 rounded-lg hover:bg-rose-500/10 cursor-pointer transition shrink-0">حذف</button>
+    </div>
+  `).join('');
+
+  el.filesList.querySelectorAll('.del-btn').forEach(btn =>
+    btn.addEventListener('click', async () => {
+      const name = btn.dataset.del;
+      if (!confirm(`حذف "${name}"؟`)) return;
+      const d = await fetch(`/api/bots/${encodeURIComponent(name)}`, { method:'DELETE' });
+      const j = await d.json();
+      if (j.ok) toast(`تم حذف ${name}`, 'success');
+      else toast(j.error, 'error');
+    })
+  );
+}
+
+// ── Poll ───────────────────────────────────────────────────────
+async function poll() {
+  try {
+    const d = await fetch(`/api/state?since=${S.logSince}`);
+    const state = await d.json();
+    syncStatus(state);
+  } catch { /* silent */ }
+}
+
+// ── Upload ─────────────────────────────────────────────────────
+async function uploadFiles(files) {
+  if (!files.length) return;
+  const form = new FormData();
+  for (const f of files) form.append('files', f);
+
+  el.uploadProg.classList.remove('hidden');
+  el.progFill.style.width = '30%';
+  el.progLbl.textContent = 'جاري الرفع…';
+
+  try {
+    const r = await fetch('/api/upload', { method:'POST', body: form });
+    const d = await r.json();
+    el.progFill.style.width = '100%';
+    if (d.ok) {
+      el.progLbl.textContent = `✓ تم رفع: ${d.uploaded.join(', ')}`;
+      toast(`تم رفع ${d.uploaded.length} ملف بنجاح`, 'success');
+    } else {
+      el.progLbl.textContent = `خطأ: ${d.error}`;
+      toast(d.error, 'error');
+    }
+  } catch {
+    el.progLbl.textContent = 'فشل الرفع — تحقق من الاتصال';
+    toast('فشل الرفع', 'error');
+  }
+  setTimeout(() => { el.uploadProg.classList.add('hidden'); el.progFill.style.width = '0%'; }, 3000);
+}
+
+// ── Terminal ───────────────────────────────────────────────────
+function appendTermLog(text, src = 'out') {
+  const line = document.createElement('div');
+  const colors = { out:'text-slate-200', err:'text-rose-300', sys:'text-cyan-300' };
+  line.className = colors[src] || 'text-slate-200';
+  line.textContent = text;
+  el.termLogs.appendChild(line);
+  el.termLogs.scrollTop = el.termLogs.scrollHeight;
+  // keep max 600 lines
+  while (el.termLogs.children.length > 600) el.termLogs.removeChild(el.termLogs.firstChild);
+}
+
+el.termForm.addEventListener('submit', async e => {
+  e.preventDefault();
+  const cmd = el.termInput.value.trim();
+  if (!cmd) return;
+  el.termInput.value = '';
+
+  // local commands
+  if (cmd === 'help') {
+    ['استخدم الأزرار السريعة أو اكتب أوامر shell مباشرة.',
+     'مثال: ls -la | npm install | python3 bot.py'].forEach(t => appendTermLog(t, 'sys'));
+    return;
+  }
+  if (cmd === 'clear') { el.termLogs.innerHTML = ''; return; }
+
+  await action({ action:'exec', cmd });
+});
+
+document.querySelectorAll('.sh-btn').forEach(b =>
+  b.addEventListener('click', () => { el.termInput.value = b.dataset.shell; el.termInput.focus(); })
+);
+el.clearTermBtn.addEventListener('click', () => { el.termLogs.innerHTML = ''; });
+
+// ── Bot controls ───────────────────────────────────────────────
+el.savePhoneBtn.addEventListener('click', async () => {
+  const phone = el.botPhone.value.trim();
+  if (!phone) return toast('أدخل رقم الواتساب أولاً', 'error');
+  await action({ action:'set_phone', phone });
+  toast('تم حفظ الرقم وطلب كود الربط', 'success');
+});
+
+el.btnStart.addEventListener('click', async () => {
+  const bot = el.botSelector.value;
+  if (!bot) return toast('اختر ملف بوت أولاً', 'error');
+  await action({ action:'start', bot });
+  toast(`جاري تشغيل ${bot}`, 'info');
+});
+
+el.btnRestart.addEventListener('click', async () => { await action({ action:'restart' }); toast('جاري إعادة التشغيل…', 'info'); });
+el.btnStop.addEventListener('click',    async () => { await action({ action:'stop'    }); toast('تم إيقاف البوت', 'success'); });
+el.btnReset.addEventListener('click',   async () => {
+  if (!confirm('هل تريد حذف جلسة auth_info؟ سيحتاج البوت لربط جديد.')) return;
+  await action({ action:'reset' });
+  toast('تم حذف الجلسة', 'success');
+});
+
+// ── Upload events ──────────────────────────────────────────────
+el.fileInput.addEventListener('change', () => { uploadFiles([...el.fileInput.files]); el.fileInput.value = ''; });
+el.dropZone.addEventListener('dragover',  e => { e.preventDefault(); el.dropZone.classList.add('border-cyan-400'); });
+el.dropZone.addEventListener('dragleave', ()  => el.dropZone.classList.remove('border-cyan-400'));
+el.dropZone.addEventListener('drop', e => {
+  e.preventDefault(); el.dropZone.classList.remove('border-cyan-400');
+  uploadFiles([...e.dataTransfer.files]);
+});
+
+// ── Sandbox ────────────────────────────────────────────────────
+function sbBubble(name, text, isBot) {
+  const div = document.createElement('div');
+  div.className = `flex ${isBot ? 'justify-start' : 'justify-end'} gap-2.5`;
+  div.innerHTML = isBot
+    ? `<div class="w-7 h-7 rounded-full bg-gradient-to-tr from-emerald-500 to-cyan-400 text-slate-950 font-black flex items-center justify-center text-xs shrink-0">أ</div>
+       <div class="max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tl-sm bg-slate-800/90 border border-slate-700 text-xs text-slate-100 leading-relaxed">${esc(text)}</div>`
+    : `<div class="max-w-[80%] px-3.5 py-2.5 rounded-2xl rounded-tr-sm bg-gradient-to-l from-emerald-600/40 to-cyan-600/40 border border-emerald-500/30 text-xs text-slate-100 leading-relaxed">${esc(text)}</div>`;
+  el.sbChat.appendChild(div);
+  el.sbChat.scrollTop = el.sbChat.scrollHeight;
+}
+
+function handleSb(body) {
+  if (!body.trim()) return;
+  const isAdmin = el.sbRole.value === 'admin';
+  sbBubble('أنت', body, false);
+
+  const cmd = body.replace(/أميرتي\s*/i,'').trim();
+
+  if (cmd === 'انسى' || cmd === 'انسى كل شي') {
+    S.sbMemory = [];
+    sbBubble('أميرتي', '🧠✨ تم مسح الذاكرة، نبدأ من جديد!', true);
+    return;
+  }
+  if (cmd === 'منشن' || cmd === 'الكل') {
+    if (!isAdmin) { sbBubble('أميرتي','⛔ هذا الأمر للمشرفين فقط.', true); return; }
+    sbBubble('أميرتي', `📢 ${S.sbMembers.map(m=>`@${m.name}`).join(' ')}`, true);
+    return;
+  }
+  if (['قفل','قفل الجروب','اقفل الجروب'].includes(cmd)) {
+    if (!isAdmin) { sbBubble('أميرتي','⛔ للمشرفين فقط.',true); return; }
+    S.sbGroupLocked = true; syncSb();
+    sbBubble('أميرتي','🔒 تم قفل المجموعة.', true); return;
+  }
+  if (['فتح','افتح الجروب','فتح الجروب'].includes(cmd)) {
+    if (!isAdmin) { sbBubble('أميرتي','⛔ للمشرفين فقط.',true); return; }
+    S.sbGroupLocked = false; syncSb();
+    sbBubble('أميرتي','🔓 تم فتح المجموعة.', true); return;
+  }
+  const rename = body.match(/غير\s+الاسم(?:\s+الى|\s+إلى)?\s+(.+)/i);
+  if (rename) {
+    if (!isAdmin) { sbBubble('أميرتي','⛔ للمشرفين فقط.',true); return; }
+    S.sbGroupName = rename[1].trim(); syncSb();
+    sbBubble('أميرتي', `✏️ تم تغيير الاسم إلى: *${S.sbGroupName}*`, true); return;
+  }
+  if (cmd === 'ترقية') {
+    if (!isAdmin) { sbBubble('أميرتي','⛔ للمشرفين فقط.',true); return; }
+    const t = S.sbMembers.find(m=>m.id===S.sbTargetId);
+    if (t) { t.role='admin'; syncSb(); sbBubble('أميرتي',`⭐ تمت ترقية *${t.name}* إلى مشرف.`,true); }
+    return;
+  }
+  if (cmd === 'طرد') {
+    if (!isAdmin) { sbBubble('أميرتي','⛔ للمشرفين فقط.',true); return; }
+    const t = S.sbMembers.find(m=>m.id===S.sbTargetId);
+    if (t) {
+      S.sbMembers = S.sbMembers.filter(m=>m.id!==S.sbTargetId);
+      S.sbTargetId = S.sbMembers[0]?.id||null; syncSb();
+      sbBubble('أميرتي',`🚫 تم إخراج *${t.name}*.`,true);
+    }
+    return;
+  }
+
+  // AI reply simulation
+  S.sbMemory.push(body);
+  if (S.sbMemory.length > 8) S.sbMemory.shift();
+  const reply = body.includes('مرحبا') || body.includes('خطة')
+    ? 'أهلاً! ✨ السيرفر جاهز ونبدأ بكل سلاسة.'
+    : `وصلتني رسالتك ✅ أنا متابعة معك بوعي كامل بالسياق!`;
+  setTimeout(() => sbBubble('أميرتي', reply, true), 400);
+}
+
+function syncSb() {
+  el.sbGroupName.textContent = S.sbGroupName;
+  el.sbLock.textContent = S.sbGroupLocked ? '🔒 مقفل' : '🔓 مفتوح';
+  el.sbLock.className = `text-[10px] font-bold px-2 py-0.5 rounded-full border ${S.sbGroupLocked ? 'bg-amber-500/15 text-amber-300 border-amber-400/30' : 'bg-emerald-500/15 text-emerald-300 border-emerald-400/30'}`;
+  const t = S.sbMembers.find(m=>m.id===S.sbTargetId);
+  el.sbTarget.textContent = t ? `الهدف: ${t.name} (${t.role==='admin'?'مشرف':'عضو'})` : 'لا يوجد هدف';
+}
+
+el.sbForm.addEventListener('submit', e => { e.preventDefault(); handleSb(el.sbInput.value); el.sbInput.value=''; });
+document.querySelectorAll('.wa-q').forEach(b => b.addEventListener('click', () => handleSb(b.dataset.wa)));
+el.resetSbBtn.addEventListener('click', () => {
+  el.sbChat.innerHTML = '';
+  S.sbMemory = []; S.sbGroupLocked = false;
+  S.sbGroupName = 'ديوانية المطورين';
+  S.sbMembers = [{id:'m1',name:'سامر',role:'member'},{id:'m2',name:'ليلى',role:'admin'},{id:'m3',name:'كريم',role:'member'}];
+  S.sbTargetId = 'm1'; syncSb();
+  sbBubble('أميرتي','أهلاً! ✨ جرب الأوامر السريعة بالأعلى.', true);
+  toast('تمت إعادة الضبط', 'info');
+});
+
+// ── Deploy Modal ───────────────────────────────────────────────
+function getDeployFiles() {
+  const phone = el.botPhone.value.trim() || '963958414394';
+  return {
+    'index.js': `// أميرتي Cloud Panel — index.js\n// npm install && node index.js\n\nconst http = require('http');\nconst { spawn, exec } = require('child_process');\nconst fs = require('fs');\nconst path = require('path');\n\nconst PORT = process.env.PORT || 3000;\nconst ADMIN_PASS = process.env.ADMIN_PASS || 'amirati2026';\n\n// ... see full source in repo`,
+    'bot.js': `// أميرتي WhatsApp Bot\n// يتصل بواتساب ويرد باستخدام Baileys + AI\n// BOT_PHONE=${phone}\n\nconst { default: makeWASocket, useMultiFileAuthState, fetchLatestBaileysVersion, DisconnectReason } = require('@whiskeysockets/baileys');\nconst pino = require('pino');\n// ... see full source in repo`,
+    'package.json': JSON.stringify({ name:'amirati-cloud-panel', version:'2.0.0', main:'index.js', scripts:{ start:'node index.js' }, dependencies:{ '@whiskeysockets/baileys':'^6.7.0', pino:'^9.0.0' }, engines:{ node:'>=18' } }, null, 2),
+    '.gitignore': 'node_modules/\nbots/auth_info/\n.env\nnpm-debug.log*',
+    'render.yaml': `services:\n  - type: web\n    name: amirati-cloud-panel\n    env: node\n    buildCommand: npm install\n    startCommand: node index.js\n    envVars:\n      - key: BOT_PHONE\n        value: "${phone}"\n      - key: ADMIN_PASS\n        value: amirati2026`,
+  };
+}
+
+function renderDeployTabs() {
+  const files = getDeployFiles();
+  el.codeTabs.innerHTML = '';
+  Object.keys(files).forEach(name => {
+    const btn = document.createElement('button');
+    const active = name === S.activeFile;
+    btn.className = active
+      ? 'mono text-xs font-bold px-3.5 py-2 rounded-t-xl bg-cyan-500/20 text-cyan-200 border-t border-x border-cyan-400/40 cursor-pointer'
+      : 'mono text-xs font-bold px-3.5 py-2 rounded-t-xl bg-slate-900 text-slate-400 hover:text-white cursor-pointer';
+    btn.textContent = name;
+    btn.onclick = () => { S.activeFile = name; renderDeployTabs(); };
+    el.codeTabs.appendChild(btn);
+  });
+  el.codeViewer.textContent = files[S.activeFile] || '';
+}
+
+el.openDeployBtn.addEventListener('click', () => { renderDeployTabs(); el.deployModal.classList.remove('hidden'); });
+el.closeDeployBtn.addEventListener('click', () => el.deployModal.classList.add('hidden'));
+el.copyFileBtn.addEventListener('click', () => {
+  navigator.clipboard.writeText(el.codeViewer.textContent).then(() => toast(`تم نسخ ${S.activeFile}`, 'success'));
+});
+el.downloadFileBtn.addEventListener('click', () => {
+  const blob = new Blob([el.codeViewer.textContent], { type:'text/plain;charset=utf-8' });
+  const a = Object.assign(document.createElement('a'), { href: URL.createObjectURL(blob), download: S.activeFile });
+  document.body.appendChild(a); a.click(); document.body.removeChild(a);
+  toast(`تم تحميل ${S.activeFile}`, 'info');
+});
+
+// ── Helpers ────────────────────────────────────────────────────
+function esc(s) { return String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c])); }
+function fmtSize(b) { return b < 1024 ? `${b}B` : b < 1048576 ? `${(b/1024).toFixed(1)}KB` : `${(b/1048576).toFixed(1)}MB`; }
+
+// ── Init ───────────────────────────────────────────────────────
+syncSb();
+sbBubble('أميرتي','أهلاً! ✨ جرب الأوامر السريعة بالأعلى أو ارفع ملف بوت وشغّله.', true);
+appendTermLog('[SERVER] أميرتي Cloud Panel جاهز — ارفع ملف بوت وابدأ', 'sys');
+
+poll();
+S.pollTimer = setInterval(poll, 3000);
+
+})();
+</script>
+</body>
+</html>
