@@ -1,17 +1,17 @@
 {
   "name": "amirati-cloud-panel",
   "version": "2.0.0",
-  "description": "أميرتي — لوحة التحكم السحابية لبوت الواتساب",
+  "description": "لوحة التحكم السحابية لبوت الواتساب (أميرتي / طارق)",
   "main": "index.js",
   "scripts": {
     "start": "node index.js",
     "dev": "node --watch index.js"
   },
   "dependencies": {
-    "@whiskeysockets/baileys": "^6.7.0",
+    "@whiskeysockets/baileys": "^6.7.16",
     "pino": "^9.0.0"
   },
   "engines": {
-    "node": ">=18"
+    "node": ">=18 <25"
   }
 }
