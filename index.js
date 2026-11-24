@@ -1,72 +1,115 @@
 /**
- * أميرتي Cloud Panel — index.js
- * HTTP Server + Bot Manager + File Upload API
- * Node.js built-ins only (http, fs, path, child_process)
- * No external dependencies except multer-less file parsing
+ * لوحة أميرتي السحابية — index.js
+ * خادم HTTP + مدير البوتات + واجهة رفع الملفات
+ * وظائف Node.js المدمجة فقط (http, fs, path, child_process)
  */
 
 'use strict';
 
-const http     = require('http');
+const http = require('http');
 const { spawn, exec } = require('child_process');
-const fs       = require('fs');
-const path     = require('path');
+const fs = require('fs');
+const path = require('path');
 
-const PORT       = process.env.PORT || 3000;
+const PORT = process.env.PORT || 3000;
 const ADMIN_PASS = process.env.ADMIN_PASS || 'amirati2026';
-const BOTS_DIR   = path.join(__dirname, 'bots');
-const CLIENT_DIR = path.join(__dirname, '..', 'client');
+const BOTS_DIR = path.join(__dirname, 'bots');
 
-if (!fs.existsSync(BOTS_DIR)) fs.mkdirSync(BOTS_DIR, { recursive: true });
+function resolveClientDir() {
+  const candidates = [
+    path.join(__dirname, 'client'),
+    path.join(__dirname, '..', 'client'),
+    path.join(__dirname, 'public'),
+    __dirname,
+  ];
+  for (const dir of candidates) {
+    if (fs.existsSync(path.join(dir, 'index.html'))) {
+      return dir;
+    }
+  }
+  return path.join(__dirname, '..', 'client');
+}
 
-// ── State ─────────────────────────────────────────────────────
-let botProcess   = null;
-let botStatus    = 'stopped';   // stopped | starting | online | reconnecting
-let pairingCode  = '';
-let activeBot    = null;        // filename of currently running bot
+const CLIENT_DIR = resolveClientDir();
+
+if (!fs.existsSync(BOTS_DIR)) {
+  fs.mkdirSync(BOTS_DIR, { recursive: true });
+}
+
+// ── الحالة ─────────────────────────────────────────────────────────────────
+let botProcess = null;
+let botStatus = 'stopped'; // stopped | starting | online | reconnecting
+let pairingCode = '';
+let activeBot = null;
 let currentPhone = (process.env.BOT_PHONE || '').replace(/\D/g, '');
 const logs = [];
 
-// ── Logging ───────────────────────────────────────────────────
+// ── تسجيل الأحداث ──────────────────────────────────────────────────────────
 function addLog(line, src = 'out') {
   const clean = String(line || '').trim();
   if (!clean) return;
   const ts = Date.now();
   logs.push({ ts, src, text: clean });
-  if (logs.length > 400) logs.shift();
+  if (logs.length > 400) {
+    logs.shift();
+  }
   process.stdout.write(clean + '\n');
 
   const pairMatch = clean.match(/PAIRING CODE[:\s]+([A-Z0-9\-]{6,12})/i);
   if (pairMatch) pairingCode = pairMatch[1];
-  if (clean.includes('[OK]') && clean.includes('ONLINE')) { botStatus = 'online'; pairingCode = ''; }
-  if (clean.includes('[CLOSE]'))   botStatus = 'reconnecting';
+  if (clean.includes('[OK]') && clean.includes('ONLINE')) {
+    botStatus = 'online';
+    pairingCode = '';
+  }
+  if (clean.includes('[CLOSE]')) {
+    botStatus = 'reconnecting';
+  }
 }
 
-// ── Bot runner ────────────────────────────────────────────────
+// ── بوت رانر ───────────────────────────────────────────────────────────────
 function getRunner(filename) {
   const ext = path.extname(filename).toLowerCase();
   return { '.js': ['node'], '.py': ['python3', '-u'], '.ts': ['ts-node'], '.sh': ['bash'] }[ext] || null;
 }
 
+function stopBot() {
+  if (!botProcess) return;
+  try {
+    botProcess.kill('SIGTERM');
+  } catch {}
+  botProcess = null;
+  botStatus = 'stopped';
+  activeBot = null;
+  addLog('[PANEL] تم إيقاف البوت.', 'sys');
+}
+
 function startBot(filename) {
+  if (!filename) {
+    const files = fs.readdirSync(BOTS_DIR).filter(f => !fs.statSync(path.join(BOTS_DIR, f)).isDirectory());
+    filename = files[0] || null;
+  }
+  if (!filename) return addLog('[ERR] لا يوجد ملف بوت لتشغيله.', 'err');
+
   if (botProcess) stopBot();
-  const filePath = path.join(BOTS_DIR, filename);
+  const filePath = path.join(BOTS_DIR, path.basename(filename));
   if (!fs.existsSync(filePath)) return addLog(`[ERR] الملف غير موجود: ${filename}`, 'err');
 
-  const runner = getRunner(filename);
+  const runner = getRunner(filePath);
   if (!runner) return addLog(`[ERR] نوع الملف غير مدعوم: ${filename}`, 'err');
 
   botStatus = 'starting';
-  activeBot = filename;
-  addLog(`[PANEL] تشغيل البوت: ${filename}`);
+  activeBot = path.basename(filePath);
+  addLog(`[PANEL] تشغيل البوت: ${activeBot}`, 'sys');
 
   botProcess = spawn(runner[0], [...runner.slice(1), filePath], {
     cwd: BOTS_DIR,
-    env: { ...process.env, BOT_PHONE: currentPhone }
+    env: { ...process.env, BOT_PHONE: currentPhone },
   });
 
   botProcess.stdout.on('data', d => d.toString().split('\n').forEach(l => addLog(l, 'out')));
-  botProcess.stderr.on('data', d => d.toString().split('\n').forEach(l => { if (l.trim()) addLog(l, 'err'); }));
+  botProcess.stderr.on('data', d => d.toString().split('\n').forEach(l => {
+    if (l.trim()) addLog(l, 'err');
+  }));
   botProcess.on('close', code => {
     addLog(`[PANEL] البوت توقف (exit ${code})`, 'sys');
     botProcess = null;
@@ -75,16 +118,8 @@ function startBot(filename) {
   });
 }
 
-function stopBot() {
-  if (!botProcess) return;
-  botProcess.kill('SIGTERM');
-  botProcess = null;
-  botStatus = 'stopped';
-  addLog('[PANEL] تم إيقاف البوت.', 'sys');
-}
-
 function restartBot() {
-  const name = activeBot || (fs.readdirSync(BOTS_DIR)[0] || null);
+  const name = activeBot || (fs.readdirSync(BOTS_DIR).filter(f => !fs.statSync(path.join(BOTS_DIR, f)).isDirectory())[0] || null);
   stopBot();
   if (name) setTimeout(() => startBot(name), 1200);
 }
@@ -94,14 +129,14 @@ function resetSession() {
   const authDir = path.join(BOTS_DIR, 'auth_info');
   fs.rmSync(authDir, { recursive: true, force: true });
   pairingCode = '';
-  addLog('[PANEL] تم حذف جلسة auth_info بنجاح.', 'sys');
+  addLog('[PANEL] تم حذف جلسة auth_info الفعالة.', 'sys');
 }
 
-// ── Multipart file parser (no deps) ──────────────────────────
+// ── محلل ملفات متعدد الأجزاء ──────────────────────────────────────────────
 function parseMultipart(req, cb) {
   const ct = req.headers['content-type'] || '';
   const boundaryMatch = ct.match(/boundary=([^\s;]+)/);
-  if (!boundaryMatch) return cb(new Error('No boundary'));
+  if (!boundaryMatch) return cb(new Error('لا يوجد حد للملفات'));
   const boundary = '--' + boundaryMatch[1];
 
   const chunks = [];
@@ -116,21 +151,28 @@ function parseMultipart(req, cb) {
       if (bStart === -1) break;
       pos = bStart + boundary.length;
       if (buf.slice(pos, pos + 2).toString() === '--') break;
-      pos += 2; // skip \r\n
+      pos += 2;
 
       const headerEnd = buf.indexOf('\r\n\r\n', pos);
       if (headerEnd === -1) break;
       const headers = buf.slice(pos, headerEnd).toString();
       pos = headerEnd + 4;
 
-      const nameMatch     = headers.match(/name="([^"]+)"/);
+      const nameMatch = headers.match(/name="([^"]+)"/);
       const filenameMatch = headers.match(/filename="([^"]+)"/);
-      if (!filenameMatch) { pos++; continue; }
+      if (!filenameMatch) {
+        pos += 1;
+        continue;
+      }
 
       const nextBoundary = buf.indexOf('\r\n' + boundary, pos);
       if (nextBoundary === -1) break;
       const fileData = buf.slice(pos, nextBoundary);
-      files.push({ fieldname: nameMatch?.[1] || 'file', filename: path.basename(filenameMatch[1]), data: fileData });
+      files.push({
+        fieldname: nameMatch?.[1] || 'file',
+        filename: path.basename(filenameMatch[1]),
+        data: fileData,
+      });
       pos = nextBoundary + 2;
     }
     cb(null, files);
@@ -138,26 +180,28 @@ function parseMultipart(req, cb) {
   req.on('error', cb);
 }
 
-// ── Serve static files ────────────────────────────────────────
+// ── خدمة الملفات الثابتة ───────────────────────────────────────────────────
 const MIME = {
   '.html': 'text/html; charset=utf-8',
-  '.css':  'text/css',
-  '.js':   'application/javascript',
-  '.ico':  'image/x-icon',
-  '.png':  'image/png',
-  '.json': 'application/json',
+  '.css': 'text/css; charset=utf-8',
+  '.js': 'application/javascript; charset=utf-8',
+  '.ico': 'image/x-icon',
+  '.png': 'image/png',
+  '.json': 'application/json; charset=utf-8',
 };
 
 function serveStatic(res, filePath) {
   fs.readFile(filePath, (err, data) => {
-    if (err) { res.writeHead(404); return res.end('Not found'); }
-    const ext = path.extname(filePath);
-    res.writeHead(200, { 'Content-Type': MIME[ext] || 'text/plain' });
+    if (err) {
+      res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+      return res.end('Not found');
+    }
+    const ext = path.extname(filePath).toLowerCase();
+    res.writeHead(200, { 'Content-Type': MIME[ext] || 'application/octet-stream' });
     res.end(data);
   });
 }
 
-// ── JSON helpers ──────────────────────────────────────────────
 function json(res, code, obj) {
   res.writeHead(code, { 'Content-Type': 'application/json; charset=utf-8' });
   res.end(JSON.stringify(obj));
@@ -165,28 +209,38 @@ function json(res, code, obj) {
 
 function readBody(req, cb) {
   let b = '';
-  req.on('data', c => b += c);
-  req.on('end', () => { try { cb(null, JSON.parse(b || '{}')); } catch (e) { cb(e); } });
+  req.on('data', c => { b += c; });
+  req.on('end', () => {
+    try {
+      cb(null, JSON.parse(b || '{}'));
+    } catch (e) {
+      cb(e);
+    }
+  });
 }
 
-// ── HTTP Server ───────────────────────────────────────────────
+// ── خادم HTTP ──────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
 
-  const url = req.url.split('?')[0];
+  const rawUrl = req.url || '/';
+  const [urlPath, queryString] = rawUrl.split('?');
   const method = req.method;
 
-  // ── Health check
-  if (method === 'GET' && url === '/health') {
-    res.writeHead(200); return res.end('OK');
+  if (method === 'GET' && urlPath === '/health') {
+    res.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8' });
+    return res.end('OK');
   }
 
-  // ── API: state
-  if (method === 'GET' && url === '/api/state') {
-    const since = parseInt(new URLSearchParams(req.url.split('?')[1] || '').get('since') || '0', 10);
-    const bots  = fs.readdirSync(BOTS_DIR)
+  if (method === 'GET' && urlPath === '/api/state') {
+    const since = parseInt(new URLSearchParams(queryString || '').get('since') || '0', 10);
+    const bots = fs.readdirSync(BOTS_DIR)
       .filter(f => !fs.statSync(path.join(BOTS_DIR, f)).isDirectory())
-      .map(f => ({ name: f, size: fs.statSync(path.join(BOTS_DIR, f)).size, ext: path.extname(f) }));
+      .map(f => ({
+        name: f,
+        size: fs.statSync(path.join(BOTS_DIR, f)).size,
+        ext: path.extname(f),
+      }));
     return json(res, 200, {
       status: botStatus,
       pairingCode,
@@ -197,8 +251,7 @@ const server = http.createServer((req, res) => {
     });
   }
 
-  // ── API: upload bot file
-  if (method === 'POST' && url === '/api/upload') {
+  if (method === 'POST' && urlPath === '/api/upload') {
     parseMultipart(req, (err, files) => {
       if (err || !files.length) return json(res, 400, { ok: false, error: 'لا توجد ملفات صالحة' });
       const allowed = ['.py', '.js', '.ts', '.sh'];
@@ -216,9 +269,8 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ── API: delete bot file
-  if (method === 'DELETE' && url.startsWith('/api/bots/')) {
-    const name = decodeURIComponent(url.replace('/api/bots/', ''));
+  if (method === 'DELETE' && urlPath.startsWith('/api/bots/')) {
+    const name = path.basename(decodeURIComponent(urlPath.replace('/api/bots/', '')));
     const fp = path.join(BOTS_DIR, name);
     if (!fs.existsSync(fp)) return json(res, 404, { ok: false, error: 'الملف غير موجود' });
     if (activeBot === name) stopBot();
@@ -227,19 +279,24 @@ const server = http.createServer((req, res) => {
     return json(res, 200, { ok: true });
   }
 
-  // ── API: actions (start/stop/restart/reset/exec/set_phone)
-  if (method === 'POST' && url === '/api/action') {
+  if (method === 'POST' && urlPath === '/api/action') {
     readBody(req, (err, body) => {
       if (err) return json(res, 400, { ok: false, error: 'JSON غير صالح' });
       if (body.pass !== ADMIN_PASS) return json(res, 403, { ok: false, error: 'كلمة المرور غير صحيحة' });
 
       switch (body.action) {
         case 'start':
-          startBot(body.bot || fs.readdirSync(BOTS_DIR).filter(f => !fs.statSync(path.join(BOTS_DIR,f)).isDirectory())[0]);
+          startBot(body.bot);
           break;
-        case 'stop':     stopBot(); break;
-        case 'restart':  restartBot(); break;
-        case 'reset':    resetSession(); break;
+        case 'stop':
+          stopBot();
+          break;
+        case 'restart':
+          restartBot();
+          break;
+        case 'reset':
+          resetSession();
+          break;
         case 'set_phone':
           currentPhone = String(body.phone || '').replace(/\D/g, '');
           addLog(`[PANEL] رقم الواتساب: ${currentPhone}`, 'sys');
@@ -260,16 +317,17 @@ const server = http.createServer((req, res) => {
     return;
   }
 
-  // ── Static files
   if (method === 'GET') {
-    let filePath = url === '/' ? '/index.html' : url;
-    serveStatic(res, path.join(CLIENT_DIR, filePath));
+    const safeRel = path.normalize(urlPath === '/' ? 'index.html' : urlPath).replace(/^(\.\.[/\\])+/, '');
+    serveStatic(res, path.join(CLIENT_DIR, safeRel));
     return;
   }
 
-  res.writeHead(404); res.end('Not found');
+  res.writeHead(404, { 'Content-Type': 'text/plain; charset=utf-8' });
+  res.end('Not found');
 });
 
-server.listen(PORT, () => {
-  addLog(`[SERVER] أميرتي Cloud Panel يعمل على المنفذ ${PORT}`, 'sys');
+server.listen(PORT, '0.0.0.0', () => {
+  addLog(`[SERVER] أميرتي Cloud Panel تعمل على المنفذ ${PORT}`, 'sys');
 });
+  
