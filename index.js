@@ -67,6 +67,16 @@ function addLog(line, src = 'out') {
   }
 }
 
+function listBotFiles() {
+  return fs.readdirSync(BOTS_DIR)
+    .filter(f => !fs.statSync(path.join(BOTS_DIR, f)).isDirectory())
+    .map(f => ({
+      name: f,
+      size: fs.statSync(path.join(BOTS_DIR, f)).size,
+      ext: path.extname(f),
+    }));
+}
+
 // ── بوت رانر ───────────────────────────────────────────────────────────────
 function getRunner(filename) {
   const ext = path.extname(filename).toLowerCase();
@@ -74,7 +84,11 @@ function getRunner(filename) {
 }
 
 function stopBot() {
-  if (!botProcess) return;
+  if (!botProcess) {
+    botStatus = 'stopped';
+    activeBot = null;
+    return;
+  }
   try {
     botProcess.kill('SIGTERM');
   } catch {}
@@ -86,17 +100,26 @@ function stopBot() {
 
 function startBot(filename) {
   if (!filename) {
-    const files = fs.readdirSync(BOTS_DIR).filter(f => !fs.statSync(path.join(BOTS_DIR, f)).isDirectory());
-    filename = files[0] || null;
+    const files = listBotFiles();
+    filename = files[0]?.name || null;
   }
-  if (!filename) return addLog('[ERR] لا يوجد ملف بوت لتشغيله.', 'err');
+  if (!filename) {
+    addLog('[ERR] لا يوجد ملف بوت لتشغيله.', 'err');
+    return { ok: false, error: 'لا يوجد ملف بوت لتشغيله' };
+  }
 
   if (botProcess) stopBot();
   const filePath = path.join(BOTS_DIR, path.basename(filename));
-  if (!fs.existsSync(filePath)) return addLog(`[ERR] الملف غير موجود: ${filename}`, 'err');
+  if (!fs.existsSync(filePath)) {
+    addLog(`[ERR] الملف غير موجود: ${filename}`, 'err');
+    return { ok: false, error: `الملف غير موجود: ${filename}` };
+  }
 
   const runner = getRunner(filePath);
-  if (!runner) return addLog(`[ERR] نوع الملف غير مدعوم: ${filename}`, 'err');
+  if (!runner) {
+    addLog(`[ERR] نوع الملف غير مدعوم: ${filename}`, 'err');
+    return { ok: false, error: `نوع الملف غير مدعوم: ${filename}` };
+  }
 
   botStatus = 'starting';
   activeBot = path.basename(filePath);
@@ -121,12 +144,18 @@ function startBot(filename) {
     botStatus = 'stopped';
     activeBot = null;
   });
+
+  return { ok: true, message: `تم بدء تشغيل ${activeBot}` };
 }
 
-function restartBot() {
-  const name = activeBot || (fs.readdirSync(BOTS_DIR).filter(f => !fs.statSync(path.join(BOTS_DIR, f)).isDirectory())[0] || null);
+function restartBot(filename) {
+  const name = filename || activeBot || (listBotFiles()[0]?.name || null);
   stopBot();
-  if (name) setTimeout(() => startBot(name), 1200);
+  if (name) {
+    setTimeout(() => startBot(name), 1200);
+    return { ok: true, message: `جاري إعادة تشغيل ${name}` };
+  }
+  return { ok: false, error: 'لا يوجد ملف بوت لإعادة تشغيله' };
 }
 
 function resetSession() {
@@ -135,6 +164,7 @@ function resetSession() {
   fs.rmSync(authDir, { recursive: true, force: true });
   pairingCode = '';
   addLog('[PANEL] تم حذف جلسة auth_info الفعالة.', 'sys');
+  return { ok: true, message: 'تم حذف الجلسة بنجاح' };
 }
 
 // ── محلل ملفات متعدد الأجزاء ──────────────────────────────────────────────
@@ -142,7 +172,10 @@ function parseMultipart(req, cb) {
   const ct = req.headers['content-type'] || '';
   const boundaryMatch = ct.match(/boundary=([^\s;]+)/);
   if (!boundaryMatch) return cb(new Error('لا يوجد حد للملفات'));
-  const boundary = '--' + boundaryMatch[1];
+  const boundary = Buffer.from('--' + boundaryMatch[1]);
+  const dashDash = Buffer.from('--');
+  const crlf = Buffer.from('\r\n');
+  const headerSep = Buffer.from('\r\n\r\n');
 
   const chunks = [];
   req.on('data', c => chunks.push(c));
@@ -155,30 +188,33 @@ function parseMultipart(req, cb) {
       const bStart = buf.indexOf(boundary, pos);
       if (bStart === -1) break;
       pos = bStart + boundary.length;
-      if (buf.slice(pos, pos + 2).toString() === '--') break;
-      pos += 2;
+      if (buf.slice(pos, pos + 2).equals(dashDash)) break;
+      if (buf.slice(pos, pos + 2).equals(crlf)) pos += 2;
 
-      const headerEnd = buf.indexOf('\r\n\r\n', pos);
+      const headerEnd = buf.indexOf(headerSep, pos);
       if (headerEnd === -1) break;
-      const headers = buf.slice(pos, headerEnd).toString();
+      const headers = buf.slice(pos, headerEnd).toString('utf8');
       pos = headerEnd + 4;
 
-      const nameMatch = headers.match(/name="([^"]+)"/);
-      const filenameMatch = headers.match(/filename="([^"]+)"/);
-      if (!filenameMatch) {
-        pos += 1;
-        continue;
-      }
+      const nameMatch = headers.match(/name="([^"]+)"/i);
+      const filenameMatch = headers.match(/filename="([^"]*)"/i);
 
-      const nextBoundary = buf.indexOf('\r\n' + boundary, pos);
-      if (nextBoundary === -1) break;
-      const fileData = buf.slice(pos, nextBoundary);
-      files.push({
-        fieldname: nameMatch?.[1] || 'file',
-        filename: path.basename(filenameMatch[1]),
-        data: fileData,
-      });
-      pos = nextBoundary + 2;
+      let partEnd = buf.indexOf(Buffer.concat([crlf, boundary]), pos);
+      let nextPos = partEnd === -1 ? -1 : partEnd + 2;
+      if (partEnd === -1) {
+        partEnd = buf.indexOf(boundary, pos);
+        nextPos = partEnd;
+      }
+      if (partEnd === -1) break;
+
+      if (filenameMatch && filenameMatch[1]) {
+        files.push({
+          fieldname: nameMatch?.[1] || 'file',
+          filename: path.basename(filenameMatch[1]),
+          data: buf.slice(pos, partEnd),
+        });
+      }
+      pos = nextPos;
     }
     cb(null, files);
   });
@@ -224,9 +260,53 @@ function readBody(req, cb) {
   });
 }
 
+function isAuthorized(req, body) {
+  const headerPass = String(req.headers['x-admin-pass'] || '').trim();
+  const bodyPass = String(body?.pass || '').trim();
+  return headerPass === ADMIN_PASS || bodyPass === ADMIN_PASS;
+}
+
+function runShellCommand(cmd, cb) {
+  const clean = String(cmd || '').trim();
+  if (!clean) return cb(null, '');
+  addLog(`$ ${clean}`, 'sys');
+  exec(clean, { cwd: BOTS_DIR, timeout: 60000 }, (e, out, err2) => {
+    const lines = [];
+    if (out) {
+      out.split('\n').forEach(l => {
+        if (l.trim()) {
+          addLog(l, 'out');
+          lines.push(l);
+        }
+      });
+    }
+    if (err2) {
+      err2.split('\n').forEach(l => {
+        if (l.trim()) {
+          addLog(l, 'err');
+          lines.push(l);
+        }
+      });
+    }
+    if (e && !err2) {
+      const m = `[ERR] ${e.message}`;
+      addLog(m, 'err');
+      lines.push(m);
+    }
+    cb(null, lines.join('\n'));
+  });
+}
+
 // ── خادم HTTP ──────────────────────────────────────────────────────────────
 const server = http.createServer((req, res) => {
   res.setHeader('Access-Control-Allow-Origin', '*');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, x-admin-pass');
+
+  if (req.method === 'OPTIONS') {
+    res.writeHead(204);
+    return res.end();
+  }
 
   const rawUrl = req.url || '/';
   const [urlPath, queryString] = rawUrl.split('?');
@@ -239,13 +319,7 @@ const server = http.createServer((req, res) => {
 
   if (method === 'GET' && urlPath === '/api/state') {
     const since = parseInt(new URLSearchParams(queryString || '').get('since') || '0', 10);
-    const bots = fs.readdirSync(BOTS_DIR)
-      .filter(f => !fs.statSync(path.join(BOTS_DIR, f)).isDirectory())
-      .map(f => ({
-        name: f,
-        size: fs.statSync(path.join(BOTS_DIR, f)).size,
-        ext: path.extname(f),
-      }));
+    const bots = listBotFiles();
     return json(res, 200, {
       status: botStatus,
       pairingCode,
@@ -254,6 +328,24 @@ const server = http.createServer((req, res) => {
       bots,
       logs: logs.filter(l => l.ts > since),
     });
+  }
+
+  if (method === 'GET' && urlPath === '/api/status') {
+    const bots = listBotFiles();
+    return json(res, 200, {
+      running: Boolean(botProcess) || botStatus === 'online' || botStatus === 'starting',
+      online: botStatus === 'online',
+      status: botStatus,
+      pairingCode,
+      phone: currentPhone,
+      activeBot,
+      files: bots,
+      logs: logs.slice(-80).map(l => l.text),
+    });
+  }
+
+  if (method === 'GET' && urlPath === '/api/files') {
+    return json(res, 200, { ok: true, files: listBotFiles() });
   }
 
   if (method === 'POST' && urlPath === '/api/upload') {
@@ -284,10 +376,56 @@ const server = http.createServer((req, res) => {
     return json(res, 200, { ok: true });
   }
 
+  if (method === 'POST' && urlPath === '/api/shell') {
+    readBody(req, (err, body) => {
+      if (err) return json(res, 400, { ok: false, error: 'JSON غير صالح' });
+      if (!isAuthorized(req, body)) return json(res, 403, { ok: false, error: 'كلمة المرور غير صحيحة' });
+      const cmd = body.command || body.cmd || '';
+      runShellCommand(cmd, (_, output) => {
+        json(res, 200, { ok: true, output });
+      });
+    });
+    return;
+  }
+
+  if (method === 'POST' && urlPath === '/api/pairing') {
+    readBody(req, (err, body) => {
+      if (err) return json(res, 400, { ok: false, error: 'JSON غير صالح' });
+      if (!isAuthorized(req, body)) return json(res, 403, { ok: false, error: 'كلمة المرور غير صحيحة' });
+      const phone = String(body.phone || body.botPhone || '').replace(/\D/g, '');
+      if (!phone) return json(res, 400, { ok: false, error: 'رقم الواتساب مطلوب' });
+      currentPhone = phone;
+      addLog(`[PANEL] رقم الواتساب: ${currentPhone}`, 'sys');
+      const targetBot = activeBot || (listBotFiles()[0]?.name || null);
+      if (targetBot) startBot(targetBot);
+      json(res, 200, { ok: true, phone: currentPhone, pairingCode });
+    });
+    return;
+  }
+
+  if (method === 'POST' && urlPath.startsWith('/api/bot/')) {
+    const action = urlPath.replace('/api/bot/', '').trim();
+    readBody(req, (err, body) => {
+      if (err) return json(res, 400, { ok: false, error: 'JSON غير صالح' });
+      if (!isAuthorized(req, body)) return json(res, 403, { ok: false, error: 'كلمة المرور غير صحيحة' });
+
+      const phone = String(body.phone || body.botPhone || '').replace(/\D/g, '');
+      if (phone) currentPhone = phone;
+      const botFile = body.file || body.botFile || body.bot || '';
+
+      if (action === 'start') return json(res, 200, startBot(botFile));
+      if (action === 'stop') { stopBot(); return json(res, 200, { ok: true, message: 'تم إيقاف البوت' }); }
+      if (action === 'restart') return json(res, 200, restartBot(botFile));
+      if (action === 'reset') return json(res, 200, resetSession());
+      return json(res, 404, { ok: false, error: 'إجراء غير معروف' });
+    });
+    return;
+  }
+
   if (method === 'POST' && urlPath === '/api/action') {
     readBody(req, (err, body) => {
       if (err) return json(res, 400, { ok: false, error: 'JSON غير صالح' });
-      if (body.pass !== ADMIN_PASS) return json(res, 403, { ok: false, error: 'كلمة المرور غير صحيحة' });
+      if (!isAuthorized(req, body)) return json(res, 403, { ok: false, error: 'كلمة المرور غير صحيحة' });
 
       switch (body.action) {
         case 'start':
@@ -297,7 +435,7 @@ const server = http.createServer((req, res) => {
           stopBot();
           break;
         case 'restart':
-          restartBot();
+          restartBot(body.bot);
           break;
         case 'reset':
           resetSession();
@@ -308,12 +446,7 @@ const server = http.createServer((req, res) => {
           break;
         case 'exec':
           if (body.cmd) {
-            addLog(`$ ${body.cmd}`, 'sys');
-            exec(body.cmd, { cwd: BOTS_DIR, timeout: 15000 }, (e, out, err2) => {
-              if (out) out.split('\n').forEach(l => addLog(l, 'out'));
-              if (err2) err2.split('\n').forEach(l => { if (l.trim()) addLog(l, 'err'); });
-              if (e && !err2) addLog(`[ERR] ${e.message}`, 'err');
-            });
+            runShellCommand(body.cmd, () => {});
           }
           break;
       }
@@ -348,3 +481,4 @@ const server = http.createServer((req, res) => {
 server.listen(PORT, '0.0.0.0', () => {
   addLog(`[SERVER] أميرتي Cloud Panel تعمل على المنفذ ${PORT}`, 'sys');
 });
+  
