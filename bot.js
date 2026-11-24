@@ -40,35 +40,50 @@ const chatMemory      = new Map();
 const processedIds    = new Set();
 
 // ── AI ────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `أنت "أميرتي"، مساعدة ذكاء اصطناعي ذكية ومشرفة على واتساب.
-- تفاعلي بذكاء واختصار مفيد مع اسم المتحدث.
-- لا تذكري أعذاراً تقنية أو حالة الشبكة أبداً.`.trim();
+const SYSTEM_PROMPT = `أنت "أميرتي"، مساعدة ذكاء اصطناعي مختصرة على واتساب. أجيبي بوضوح واختصار مع اسم المتحدث دون أعذار تقنية.`.trim();
+
+function shortenText(str, maxLen = 160) {
+  return String(str || '').replace(/\s+/g, ' ').trim().slice(0, maxLen);
+}
 
 async function askAI(jid, speaker, prompt) {
   if (!chatMemory.has(jid)) chatMemory.set(jid, []);
   const history = chatMemory.get(jid);
-  history.push({ role: 'user', speaker, text: prompt.slice(0, 320) });
-  if (history.length > 8) history.shift();
+  history.push({ role: 'user', speaker: shortenText(speaker, 25), text: shortenText(prompt, 160) });
+  while (history.length > 3) history.shift();
 
   const transcript = history.map(m =>
     `${m.role === 'user' ? m.speaker : 'أميرتي'}: ${m.text}`).join('\n');
-  const fullPrompt = `${SYSTEM_PROMPT}\n\n--- المحادثة ---\n${transcript}\n\nردي بصفتك أميرتي على (${speaker}):`;
+  const fullPrompt = shortenText(`${SYSTEM_PROMPT}\n${transcript}\nردي على (${shortenText(speaker, 25)}):`, 650);
 
-  for (let i = 1; i <= 3; i++) {
+  let lastErr = 'AI exhausted';
+  for (let i = 1; i <= 2; i++) {
     const ctrl  = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), i === 1 ? 18000 : 28000);
+    const timer = setTimeout(() => ctrl.abort(), 14000);
     try {
-      const res = await fetch(`https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`, { signal: ctrl.signal });
+      const url = `https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`;
+      const res = await fetch(url, { method: 'GET', signal: ctrl.signal });
       clearTimeout(timer);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const reply = (await res.text()).trim();
-      if (reply) {
-        history.push({ role: 'assistant', speaker: 'أميرتي', text: reply.slice(0, 320) });
-        return reply;
+      if (!res.ok) {
+        lastErr = `HTTP ${res.status} (${res.statusText || 'Error'})`;
+        throw new Error(lastErr);
       }
-    } catch { clearTimeout(timer); await new Promise(r => setTimeout(r, 1500 * i)); }
+      const reply = (await res.text()).trim();
+      if (!reply) {
+        lastErr = 'Empty AI response';
+        throw new Error(lastErr);
+      }
+      history.push({ role: 'assistant', speaker: 'أميرتي', text: shortenText(reply, 160) });
+      while (history.length > 3) history.shift();
+      return reply;
+    } catch (e) {
+      clearTimeout(timer);
+      lastErr = e?.name === 'AbortError' ? 'Timeout (14s)' : (e?.message || String(e));
+      origLog(`[AI-WARN] محاولة ${i} فشلت: ${lastErr}`);
+      if (i < 2) await new Promise(r => setTimeout(r, 1200));
+    }
   }
-  throw new Error('AI exhausted');
+  throw new Error(lastErr);
 }
 
 // ── Reconnect ─────────────────────────────────────────────────
@@ -138,7 +153,7 @@ async function boot() {
     // ── Messages ──────────────────────────────────────────────
     sock.ev.on('messages.upsert', async ({ messages, type }) => {
       try {
-        if (type !== 'notify' && type !== 'append') return;
+        if (type !== 'notify') return;
         const msg = messages?.[0];
         if (!msg?.message || processedIds.has(msg.key?.id)) return;
         processedIds.add(msg.key?.id);
@@ -164,7 +179,7 @@ async function boot() {
 
         if (isGroup && !mentionsMe) return;
 
-        origLog(`[MSG] ${pushName}: ${body}`);
+        origLog(`[MSG] ${pushName}: ${shortenText(body, 120)}`);
 
         // أوامر خاصة
         const cmd = body.replace(/أميرتي\s*/i, '').trim().toLowerCase();
@@ -180,8 +195,8 @@ async function boot() {
           const reply = await askAI(jid, pushName, body);
           await sock.sendMessage(jid, { text: reply }, { quoted: msg });
           origLog(`[SENT] رد على ${pushName}`);
-        } catch {
-          // صمت تام — بدون أعذار
+        } catch (err) {
+          origLog(`[AI-ERR] فشل الرد على ${pushName}: ${err?.message || err}`);
         }
       } catch (e) {
         origLog('[ERR] messages.upsert: ' + e.message);
