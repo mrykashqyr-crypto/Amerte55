@@ -1,6 +1,6 @@
 /**
  * أميرتي WhatsApp Bot — bot.js
- * يعمل مع Baileys + AI من pollinations.ai مجاناً
+ * يعمل مع Baileys + Google Gemini API عبر GEMINI_API_KEY
  * ضعه في مجلد bots/ وشغّله من لوحة التحكم
  */
 
@@ -39,48 +39,76 @@ let reconnectCount    = 0;
 const chatMemory      = new Map();
 const processedIds    = new Set();
 
-// ── AI ────────────────────────────────────────────────────────
-const SYSTEM_PROMPT = `أنت "أميرتي"، مساعدة ذكاء اصطناعي مختصرة على واتساب. أجيبي بوضوح واختصار مع اسم المتحدث دون أعذار تقنية.`.trim();
+// ── AI (Gemini) ───────────────────────────────────────────────
+const GEMINI_API_KEY = (process.env.GEMINI_API_KEY || '').trim();
+const GEMINI_MODEL   = (process.env.GEMINI_MODEL || 'gemini-2.0-flash').trim();
+const SYSTEM_PROMPT  = `أنت "أميرتي"، مساعدة ذكاء اصطناعي مختصرة على واتساب. أجيبي بوضوح واختصار مع اسم المتحدث دون أعذار تقنية.`.trim();
 
-function shortenText(str, maxLen = 160) {
+function shortenText(str, maxLen = 180) {
   return String(str || '').replace(/\s+/g, ' ').trim().slice(0, maxLen);
 }
 
 async function askAI(jid, speaker, prompt) {
+  if (!GEMINI_API_KEY) {
+    throw new Error('GEMINI_API_KEY غير مضبوط في متغيرات البيئة');
+  }
+
   if (!chatMemory.has(jid)) chatMemory.set(jid, []);
   const history = chatMemory.get(jid);
-  history.push({ role: 'user', speaker: shortenText(speaker, 25), text: shortenText(prompt, 160) });
-  while (history.length > 3) history.shift();
+  const cleanSpeaker = shortenText(speaker, 25) || 'مستخدم';
+  history.push({ role: 'user', speaker: cleanSpeaker, text: shortenText(prompt, 180) });
+  while (history.length > 4) history.shift();
 
   const transcript = history.map(m =>
     `${m.role === 'user' ? m.speaker : 'أميرتي'}: ${m.text}`).join('\n');
-  const fullPrompt = shortenText(`${SYSTEM_PROMPT}\n${transcript}\nردي على (${shortenText(speaker, 25)}):`, 650);
+  const fullPrompt = `${transcript}\nردي بصفتك أميرتي باختصار على (${cleanSpeaker}):`;
 
-  let lastErr = 'AI exhausted';
+  let lastErr = 'Gemini failed';
   for (let i = 1; i <= 2; i++) {
     const ctrl  = new AbortController();
-    const timer = setTimeout(() => ctrl.abort(), 14000);
+    const timer = setTimeout(() => ctrl.abort(), 15000);
     try {
-      const url = `https://text.pollinations.ai/${encodeURIComponent(fullPrompt)}`;
-      const res = await fetch(url, { method: 'GET', signal: ctrl.signal });
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(GEMINI_MODEL)}:generateContent?key=${encodeURIComponent(GEMINI_API_KEY)}`;
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: ctrl.signal,
+        body: JSON.stringify({
+          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          contents: [{ role: 'user', parts: [{ text: fullPrompt }] }],
+          generationConfig: { temperature: 0.7, maxOutputTokens: 250 },
+        }),
+      });
       clearTimeout(timer);
+
+      const raw = await res.text();
+      let data = null;
+      try { data = JSON.parse(raw); } catch {}
+
       if (!res.ok) {
-        lastErr = `HTTP ${res.status} (${res.statusText || 'Error'})`;
+        const apiMsg = data?.error?.message || raw.slice(0, 120) || res.statusText;
+        lastErr = `HTTP ${res.status}: ${apiMsg}`;
         throw new Error(lastErr);
       }
-      const reply = (await res.text()).trim();
+
+      const reply = (data?.candidates?.[0]?.content?.parts || [])
+        .map(p => p?.text || '')
+        .join('')
+        .trim();
+
       if (!reply) {
-        lastErr = 'Empty AI response';
+        lastErr = 'Empty Gemini response';
         throw new Error(lastErr);
       }
-      history.push({ role: 'assistant', speaker: 'أميرتي', text: shortenText(reply, 160) });
-      while (history.length > 3) history.shift();
+
+      history.push({ role: 'assistant', speaker: 'أميرتي', text: shortenText(reply, 180) });
+      while (history.length > 4) history.shift();
       return reply;
     } catch (e) {
       clearTimeout(timer);
-      lastErr = e?.name === 'AbortError' ? 'Timeout (14s)' : (e?.message || String(e));
+      lastErr = e?.name === 'AbortError' ? 'Timeout (15s)' : (e?.message || String(e));
       origLog(`[AI-WARN] محاولة ${i} فشلت: ${lastErr}`);
-      if (i < 2) await new Promise(r => setTimeout(r, 1200));
+      if (i < 2) await new Promise(r => setTimeout(r, 1000));
     }
   }
   throw new Error(lastErr);
@@ -211,3 +239,4 @@ async function boot() {
 }
 
 boot();
+          
